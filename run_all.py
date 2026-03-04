@@ -1,5 +1,5 @@
 from strategy.data import load_prices
-from strategy.momentum_ivol import build_weights_momentum_ivol
+from strategy.equal_weight import build_weights_equal_weight, EqualWeightConfig
 from strategy.backtest import backtest_weights_returns, perf_from_returns, vol_target_returns
 from chunk.index import SimilarityIndex
 from strategy.similarity import build_monthly_weights_similarity
@@ -7,9 +7,9 @@ from strategy.similarity import build_monthly_weights_similarity
 px, ret_df = load_prices()
 
 # Baseline
-W_base = build_weights_momentum_ivol(px, ret_df)
+W_base = build_weights_equal_weight(px, cfg=EqualWeightConfig())
 res_base, _ = backtest_weights_returns(W_base, ret_df)
-print("BASE:", perf_from_returns(res_base["net_ret"]))
+print("BASE (EqualWeight Monthly Rebalance):", perf_from_returns(res_base["net_ret"]))
 
 # Similarity
 idx = SimilarityIndex.load()
