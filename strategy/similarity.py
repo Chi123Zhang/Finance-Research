@@ -1,12 +1,14 @@
 # strategy/similarity.py
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Dict, Tuple, Optional
 
 import pandas as pd
 
 from chunk.index import SimilarityIndex
+from llm.explain_similarity import explain_trade_signal
 
 
 @dataclass
@@ -85,8 +87,11 @@ def build_monthly_weights_similarity(
         raw = {}
 
         for sym in symbols:
+            neigh = pd.DataFrame()
+            evidence = {}
+            pred = None
             try:
-                neigh, _ = idx.query(
+                neigh, evidence = idx.query(
                     sym,
                     mon,
                     k=cfg.k,
@@ -95,29 +100,44 @@ def build_monthly_weights_similarity(
                 )
             except Exception:
                 raw[sym] = 0.0
-                continue
+            else:
+                pred = _pred_from_neighbors(neigh)
+                if (
+                    pred is None
+                    or pred["top1_sim"] < cfg.sim_min
+                    or pred["hit_rate"] < cfg.min_hit_rate
+                    or pred["p50"] <= cfg.min_p50
+                ):
+                    raw[sym] = 0.0
+                else:
+                    # robust signal: median upside vs tail downside
+                    downside = abs(pred["p10"]) + 1e-6
+                    strength = max(pred["p50"], 0.0) * pred["confidence"] / downside
+                    raw[sym] = float(max(strength, 0.0))
 
-            pred = _pred_from_neighbors(neigh)
-            if (
-                pred is None
-                or pred["top1_sim"] < cfg.sim_min
-                or pred["hit_rate"] < cfg.min_hit_rate
-                or pred["p50"] <= cfg.min_p50
-            ):
-                raw[sym] = 0.0
-                continue
+            signal = explain_trade_signal(sym, mon, neigh, evidence, max_bullets=5)
+            rationale_list = signal.get("rationale", [])
+            if not isinstance(rationale_list, list):
+                rationale_list = [str(rationale_list)]
+            try:
+                assert isinstance(rationale_list, list)
+            except Exception:
+                rationale_list = []
 
-            # robust signal: median upside vs tail downside
-            downside = abs(pred["p10"]) + 1e-6
-            strength = max(pred["p50"], 0.0) * pred["confidence"] / downside
-            raw[sym] = float(max(strength, 0.0))
-
-            preds_rows.append({
+            row = {
                 "rebalance_date": reb_date,
                 "month": mon,
                 "symbol": sym,
-                **pred,
-            })
+                "action": signal.get("action", "HOLD"),
+                "score": float(signal.get("score", 0.0)),
+                "expected_return": float(signal.get("expected_return", float("nan"))),
+                "uncertainty": float(signal.get("uncertainty", float("nan"))),
+                "risk_mdd": float(signal.get("risk_mdd", float("nan"))),
+                "rationale": json.dumps(rationale_list, ensure_ascii=False),
+            }
+            if pred is not None:
+                row.update(pred)
+            preds_rows.append(row)
 
         s = sum(raw.values())
         if s <= 1e-12:
