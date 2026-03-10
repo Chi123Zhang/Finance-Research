@@ -12,12 +12,6 @@ from strategy.equal_weight import build_weights_equal_weight, EqualWeightConfig
 from chunk.index import SimilarityIndex
 from strategy.similarity import build_monthly_weights_similarity
 
-# 如果这个文件存在就用，不存在也不影响 demo 跑
-try:
-    from llm.explain_similarity import explain_trade_signal
-except Exception:
-    explain_trade_signal = None
-
 
 def run_pipeline(user_message, chat_history):
     if chat_history is None:
