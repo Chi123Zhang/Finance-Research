@@ -516,4 +516,4 @@ with gr.Blocks(title="Finance Research Demo") as demo:
         outputs=[chatbot, pipeline_box, msg],
     )
 
-demo.launch()
+demo.launch(share=True)
