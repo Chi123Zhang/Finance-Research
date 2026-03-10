@@ -87,6 +87,7 @@ with gr.Blocks(title="Finance Research Demo") as demo:
             chatbot = gr.Chatbot(
                 height=500,
                 label="Conversation",
+                render_markdown=True,
             )
             msg = gr.Textbox(
                 label="Your message",
