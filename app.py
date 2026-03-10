@@ -13,58 +13,270 @@ from chunk.index import SimilarityIndex
 from strategy.similarity import build_monthly_weights_similarity
 
 
-def run_pipeline(user_message, chat_history):
-    chat_history = chat_history or []
-    logs = []
-    reply_parts = []
+# ----------------------------
+# Simple in-memory cache
+# ----------------------------
+_CACHE = {
+    "px": None,
+    "ret_df": None,
+    "idx": None,
+    "W_base": None,
+    "base_perf": None,
+    "W_sim": None,
+    "pred_df": None,
+    "sim_perf": None,
+    "vt": None,
+    "vt_perf": None,
+}
 
+
+def fmt_perf(perf: dict) -> str:
+    if not isinstance(perf, dict):
+        return str(perf)
     try:
-        logs.append("Step 1: Loading prices and returns.")
-        px, ret_df = load_prices()
-        logs.append(f"Loaded price data shape: {getattr(px, 'shape', None)}")
-        logs.append(f"Loaded return data shape: {getattr(ret_df, 'shape', None)}")
+        return (
+            f"annualized return = {perf.get('Annualized Return', float('nan')):.4f}, "
+            f"annualized vol = {perf.get('Annualized Vol', float('nan')):.4f}, "
+            f"sharpe = {perf.get('Sharpe (rf=0)', float('nan')):.4f}, "
+            f"max drawdown = {perf.get('Max Drawdown', float('nan')):.4f}"
+        )
+    except Exception:
+        return str(perf)
 
-        logs.append("Step 2: Running equal-weight baseline.")
+
+def preview_dataframe(df: pd.DataFrame, n_rows: int = 5, max_cols: int = 6) -> str:
+    if df is None or df.empty:
+        return "No rows available."
+
+    out = df.head(n_rows).copy()
+    if out.shape[1] > max_cols:
+        out = out.iloc[:, :max_cols]
+
+    return out.to_string(index=False)
+
+
+def get_data_and_returns(logs):
+    if _CACHE["px"] is None or _CACHE["ret_df"] is None:
+        logs.append("Loading prices and returns from source.")
+        px, ret_df = load_prices()
+        _CACHE["px"] = px
+        _CACHE["ret_df"] = ret_df
+    else:
+        logs.append("Using cached prices and returns.")
+
+    px = _CACHE["px"]
+    ret_df = _CACHE["ret_df"]
+
+    logs.append(f"Price data shape: {getattr(px, 'shape', None)}")
+    logs.append(f"Return data shape: {getattr(ret_df, 'shape', None)}")
+    return px, ret_df
+
+
+def get_similarity_index(logs):
+    if _CACHE["idx"] is None:
+        logs.append("Loading similarity index from disk.")
+        _CACHE["idx"] = SimilarityIndex.load()
+    else:
+        logs.append("Using cached similarity index.")
+    return _CACHE["idx"]
+
+
+def run_baseline(logs):
+    px, ret_df = get_data_and_returns(logs)
+
+    if _CACHE["W_base"] is None or _CACHE["base_perf"] is None:
+        logs.append("Running equal-weight baseline.")
         W_base = build_weights_equal_weight(px, cfg=EqualWeightConfig())
         res_base, _ = backtest_weights_returns(W_base, ret_df)
         base_perf = perf_from_returns(res_base["net_ret"])
-        logs.append(f"Baseline metrics: {base_perf}")
 
-        logs.append("Step 3: Loading similarity index.")
-        idx = SimilarityIndex.load()
-        logs.append("Similarity index loaded.")
+        _CACHE["W_base"] = W_base
+        _CACHE["base_perf"] = base_perf
+    else:
+        logs.append("Using cached baseline results.")
 
-        logs.append("Step 4: Building similarity-based weights.")
+    return _CACHE["base_perf"]
+
+
+def run_similarity(logs):
+    px, ret_df = get_data_and_returns(logs)
+    idx = get_similarity_index(logs)
+
+    if (
+        _CACHE["W_sim"] is None
+        or _CACHE["pred_df"] is None
+        or _CACHE["sim_perf"] is None
+    ):
+        logs.append("Building similarity-based weights.")
         W_sim, pred_df = build_monthly_weights_similarity(idx, px.index)
-        logs.append(f"pred_df rows: {len(pred_df)}")
-        logs.append(f"W_sim shape: {getattr(W_sim, 'shape', None)}")
 
-        logs.append("Step 5: Backtesting similarity strategy.")
+        logs.append(f"Retrieved similarity rows: {len(pred_df)}")
+        logs.append(f"Similarity weight matrix shape: {getattr(W_sim, 'shape', None)}")
+
+        logs.append("Backtesting similarity strategy.")
         res_sim, _ = backtest_weights_returns(W_sim, ret_df)
         sim_perf = perf_from_returns(res_sim["net_ret"])
-        logs.append(f"Similarity metrics: {sim_perf}")
 
-        logs.append("Step 6: Applying vol target.")
+        _CACHE["W_sim"] = W_sim
+        _CACHE["pred_df"] = pred_df
+        _CACHE["sim_perf"] = sim_perf
+    else:
+        logs.append("Using cached similarity results.")
+
+    return _CACHE["sim_perf"], _CACHE["pred_df"]
+
+
+def run_vol_target(logs):
+    sim_perf, pred_df = run_similarity(logs)
+
+    if _CACHE["vt"] is None or _CACHE["vt_perf"] is None:
+        logs.append("Applying volatility targeting to similarity returns.")
+        px, ret_df = get_data_and_returns(logs)
+        W_sim = _CACHE["W_sim"]
+        res_sim, _ = backtest_weights_returns(W_sim, ret_df)
         vt = vol_target_returns(res_sim["net_ret"])
         vt_perf = perf_from_returns(vt)
-        logs.append(f"Vol-target metrics: {vt_perf}")
 
-        reply_parts.append("## Strategy Summary")
-        reply_parts.append(f"- Baseline: `{base_perf}`")
-        reply_parts.append(f"- Similarity: `{sim_perf}`")
-        reply_parts.append(f"- Similarity + Vol Target: `{vt_perf}`")
+        _CACHE["vt"] = vt
+        _CACHE["vt_perf"] = vt_perf
+    else:
+        logs.append("Using cached vol-target results.")
 
-        if isinstance(pred_df, pd.DataFrame) and not pred_df.empty:
-            reply_parts.append("\n## Retrieved Similarity Rows")
-            try:
-                reply_parts.append(pred_df.head(5).to_markdown(index=False))
-            except Exception:
-                reply_parts.append(pred_df.head(5).to_string(index=False))
+    return _CACHE["vt_perf"], pred_df
 
-        final_reply = "\n".join(reply_parts)
+
+def build_help_message():
+    return """## Finance Research Demo
+
+You can ask things like:
+
+- `help`
+- `run all`
+- `summary`
+- `show baseline`
+- `show similarity`
+- `show vol target`
+- `compare strategies`
+- `show top rows`
+- `what did the similarity model retrieve?`
+
+This demo supports simple natural-language commands and returns the corresponding strategy outputs.
+"""
+
+
+def route_message(user_message: str) -> str:
+    msg = user_message.lower().strip()
+
+    if any(x in msg for x in ["help", "what can you do", "commands"]):
+        return "help"
+
+    if any(x in msg for x in ["run all", "summary", "overall", "full pipeline"]):
+        return "run_all"
+
+    if any(x in msg for x in ["compare", "comparison", "compare strategies"]):
+        return "compare"
+
+    if any(x in msg for x in ["baseline", "equal weight", "equal-weight"]):
+        return "baseline"
+
+    if any(x in msg for x in ["vol target", "vol-target", "volatility target", "volatility targeting"]):
+        return "vol_target"
+
+    if any(x in msg for x in ["top rows", "show rows", "retrieved rows", "similarity rows", "what did the similarity model retrieve"]):
+        return "rows"
+
+    if any(x in msg for x in ["similarity", "similar strategy", "similarity strategy"]):
+        return "similarity"
+
+    return "default"
+
+
+def run_pipeline(user_message, chat_history):
+    chat_history = chat_history or []
+    logs = []
+
+    if not user_message or not str(user_message).strip():
+        return chat_history, "Please enter a message.", ""
+
+    command = route_message(user_message)
+    logs.append(f"User command routed to: {command}")
+
+    try:
+        if command == "help":
+            final_reply = build_help_message()
+
+        elif command == "baseline":
+            base_perf = run_baseline(logs)
+            final_reply = "\n".join([
+                "## Equal-Weight Baseline",
+                f"- {fmt_perf(base_perf)}",
+                "",
+                "This is the benchmark strategy used for comparison."
+            ])
+
+        elif command == "similarity":
+            sim_perf, pred_df = run_similarity(logs)
+            final_reply = "\n".join([
+                "## Similarity Strategy",
+                f"- {fmt_perf(sim_perf)}",
+                "",
+                "This strategy builds weights from retrieved similar historical patterns."
+            ])
+
+        elif command == "vol_target":
+            vt_perf, pred_df = run_vol_target(logs)
+            final_reply = "\n".join([
+                "## Similarity + Vol Target",
+                f"- {fmt_perf(vt_perf)}",
+                "",
+                "This version applies volatility targeting on top of the similarity strategy."
+            ])
+
+        elif command == "rows":
+            sim_perf, pred_df = run_similarity(logs)
+            final_reply = "\n".join([
+                "## Retrieved Similarity Rows",
+                "```text",
+                preview_dataframe(pred_df, n_rows=5, max_cols=6),
+                "```",
+                "",
+                "Only a compact preview is shown here so the chat layout stays readable."
+            ])
+
+        elif command == "compare" or command == "run_all":
+            base_perf = run_baseline(logs)
+            sim_perf, pred_df = run_similarity(logs)
+            vt_perf, _ = run_vol_target(logs)
+
+            final_reply = "\n".join([
+                "## Strategy Comparison",
+                f"- **Baseline:** {fmt_perf(base_perf)}",
+                f"- **Similarity:** {fmt_perf(sim_perf)}",
+                f"- **Similarity + Vol Target:** {fmt_perf(vt_perf)}",
+                "",
+                "## Retrieved Similarity Rows (Preview)",
+                "```text",
+                preview_dataframe(pred_df, n_rows=5, max_cols=6),
+                "```"
+            ])
+
+        else:
+            base_perf = run_baseline(logs)
+            sim_perf, pred_df = run_similarity(logs)
+            vt_perf, _ = run_vol_target(logs)
+
+            final_reply = "\n".join([
+                "## Strategy Summary",
+                f"- **Baseline:** {fmt_perf(base_perf)}",
+                f"- **Similarity:** {fmt_perf(sim_perf)}",
+                f"- **Similarity + Vol Target:** {fmt_perf(vt_perf)}",
+                "",
+                "I did not detect a specific command, so I returned the overall summary.",
+                "Try `help` to see supported prompts."
+            ])
 
     except Exception as e:
-        final_reply = f"Error while running pipeline:\n\n{str(e)}"
+        final_reply = f"## Pipeline Error\n\n{str(e)}"
         logs.append("Pipeline failed.")
         logs.append(traceback.format_exc())
 
@@ -81,6 +293,7 @@ def clear_chat():
 
 with gr.Blocks(title="Finance Research Demo") as demo:
     gr.Markdown("# Finance Research Demo")
+    gr.Markdown("Ask about baseline, similarity strategy, volatility targeting, or retrieved rows.")
 
     with gr.Row():
         with gr.Column(scale=3):
@@ -88,10 +301,12 @@ with gr.Blocks(title="Finance Research Demo") as demo:
                 height=500,
                 label="Conversation",
                 render_markdown=True,
+                type="messages",
             )
+
             msg = gr.Textbox(
                 label="Your message",
-                placeholder="Type your message here...",
+                placeholder="Example: compare strategies",
             )
 
             with gr.Row():
