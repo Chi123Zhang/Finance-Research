@@ -22,8 +22,8 @@ DEFAULT_QUERY_SYMBOL = "AAPL"
 DEFAULT_QUERY_MONTH = "2024-11"
 DEFAULT_K = 10
 
-# TODO: replace this with your actual local GGUF model path
-DEFAULT_MODEL_PATH = "/Users/yourname/models/Qwen3.5-35B-A3B-Q4_K_M.gguf"
+DEFAULT_REPO_ID = "unsloth/Qwen2.5-7B-Instruct-GGUF"
+DEFAULT_FILENAME = "Qwen2.5-7B-Instruct-Q4_K_M.gguf"
 
 
 # ----------------------------
@@ -185,26 +185,25 @@ def run_llm_analysis(
     query_symbol=DEFAULT_QUERY_SYMBOL,
     query_month=DEFAULT_QUERY_MONTH,
     k=DEFAULT_K,
-    model_path=DEFAULT_MODEL_PATH,
+    repo_id=DEFAULT_REPO_ID,
+    filename=DEFAULT_FILENAME,
 ):
     logs.append(
         f"Building full LLM analysis for symbol={query_symbol}, month={query_month}, k={k}."
     )
-
-    if not model_path or model_path == "YOUR_LOCAL_GGUF_MODEL_PATH":
-        raise ValueError(
-            "DEFAULT_MODEL_PATH is not set. Please update it in app.py to your local GGUF model path."
-        )
+    logs.append(f"Using Hugging Face model: {repo_id} / {filename}")
 
     pkg = build_prompt_from_query(query_symbol, query_month, k=k)
     logs.append("Prompt package built. Running local LLM inference.")
 
     out = run_local_llm(
         prompt=pkg["prompt"],
-        model_path=model_path,
+        repo_id=repo_id,
+        filename=filename,
     )
 
     logs.append(f"Local LLM return code: {out.get('returncode')}")
+    logs.append(f"Resolved model path: {out.get('model_path')}")
     logs.append(f"Saved raw analysis to: {out.get('analysis_path')}")
     return pkg, out
 
@@ -358,7 +357,7 @@ def run_pipeline(user_message, chat_history):
                 query_symbol=DEFAULT_QUERY_SYMBOL,
                 query_month=DEFAULT_QUERY_MONTH,
                 k=DEFAULT_K,
-            )
+             )
 
             final_reply = "\n".join(
                 [
@@ -377,12 +376,13 @@ def run_pipeline(user_message, chat_history):
             )
 
         elif command == "llm_analysis":
-            llm_pkg, llm_out = run_llm_analysis(
-                logs,
-                query_symbol=DEFAULT_QUERY_SYMBOL,
-                query_month=DEFAULT_QUERY_MONTH,
-                k=DEFAULT_K,
-                model_path=DEFAULT_MODEL_PATH,
+           llm_pkg, llm_out = run_llm_analysis(
+               logs,
+               query_symbol=DEFAULT_QUERY_SYMBOL,
+               query_month=DEFAULT_QUERY_MONTH,
+               k=DEFAULT_K,
+               repo_id=DEFAULT_REPO_ID,
+               filename=DEFAULT_FILENAME,
             )
 
             final_text = llm_out.get("final_text", "").strip()
