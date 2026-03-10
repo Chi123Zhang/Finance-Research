@@ -24,7 +24,7 @@ DEFAULT_K = 10
 
 DEFAULT_REPO_ID = "unsloth/Qwen2.5-7B-Instruct-GGUF"
 DEFAULT_FILENAME = "Qwen2.5-7B-Instruct-Q4_K_M.gguf"
-
+DEFAULT_MODEL_PATH = "/Users/mac/path/to/Qwen2.5-7B-Instruct-Q4_K_M.gguf"
 
 # ----------------------------
 # Simple in-memory cache
