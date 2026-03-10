@@ -22,9 +22,6 @@ DEFAULT_QUERY_SYMBOL = "AAPL"
 DEFAULT_QUERY_MONTH = "2024-11"
 DEFAULT_K = 10
 
-DEFAULT_REPO_ID = "unsloth/Qwen2.5-7B-Instruct-GGUF"
-DEFAULT_FILENAME = "Qwen2.5-7B-Instruct-Q4_K_M.gguf"
-
 
 # ----------------------------
 # Simple in-memory cache
@@ -190,21 +187,16 @@ def run_llm_analysis(
     query_symbol=DEFAULT_QUERY_SYMBOL,
     query_month=DEFAULT_QUERY_MONTH,
     k=DEFAULT_K,
-    repo_id=DEFAULT_REPO_ID,
-    filename=DEFAULT_FILENAME,
 ):
     logs.append(
         f"Building full LLM analysis for symbol={query_symbol}, month={query_month}, k={k}."
     )
-    logs.append(f"Using Hugging Face model: {repo_id} / {filename}")
 
     pkg = build_prompt_from_query(query_symbol, query_month, k=k)
     logs.append("Prompt package built. Running local LLM inference.")
 
     out = run_local_llm(
         prompt=pkg["prompt"],
-        repo_id=repo_id,
-        filename=filename,
     )
 
     logs.append(f"Local LLM return code: {out.get('returncode')}")
@@ -394,8 +386,6 @@ def run_pipeline(user_message, chat_history):
                 query_symbol=DEFAULT_QUERY_SYMBOL,
                 query_month=DEFAULT_QUERY_MONTH,
                 k=DEFAULT_K,
-                repo_id=DEFAULT_REPO_ID,
-                filename=DEFAULT_FILENAME,
             )
 
             final_text = llm_out.get("final_text", "").strip()
