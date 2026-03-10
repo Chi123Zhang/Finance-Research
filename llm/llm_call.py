@@ -13,9 +13,9 @@ def run_local_llm(
     ngl: int = 50,
     temperature: float = 0.0,
 ):
-    repo_id = "bartowski/Qwen2.5-7B-Instruct-GGUF"
-    filename = "Qwen2.5-7B-Instruct-Q4_K_M.gguf"
-
+    repo_id = "unsloth/Qwen3.5-35B-A3B-GGUF"
+    filename = "Qwen3.5-35B-A3B-Q4_K_M.gguf"
+    
     model_path = hf_hub_download(
         repo_id=repo_id,
         filename=filename
