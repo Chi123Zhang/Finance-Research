@@ -1,81 +1,25 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# <a href="https://colab.research.google.com/github/Chi123Zhang/Finance-Research/blob/main/LLM%20reason.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
-
-# In[205]:
-
-
-# =========================
-# 0) Setup: clone repo
-# =========================
-REPO_URL = "https://github.com/Chi123Zhang/Finance-Research.git"
-REPO_DIR = "Finance-Research"
-
 from pathlib import Path
-import os
-
-if not Path(REPO_DIR).exists():
-    get_ipython().system('git clone {REPO_URL}')
-
-get_ipython().run_line_magic('cd', '{REPO_DIR}')
-get_ipython().system('ls -lh')
-
-
-# In[206]:
-
-
-# =========================
-# 1) Load monthly_chunks + feature matrix
-# =========================
-import pandas as pd
 import numpy as np
-
-CHUNKS_PATH = Path("chunk/sample/monthly_chunks.parquet")
-X_PATH      = Path("chunk/sample/monthly_feat_matrix.npy")
-
-assert CHUNKS_PATH.exists(), f"Missing: {CHUNKS_PATH}"
-assert X_PATH.exists(), f"Missing: {X_PATH}"
-
-monthly_chunks = pd.read_parquet(CHUNKS_PATH)
-X = np.load(X_PATH)
-
-print("monthly_chunks:", monthly_chunks.shape)
-print("X:", X.shape)
-monthly_chunks.head()
-
-
-# In[207]:
-
-
-# =========================
-# 2) Build cosine KNN index
-# =========================
+import pandas as pd
 from sklearn.neighbors import NearestNeighbors
 
-# cosine distance: smaller is more similar; we will convert to similarity = 1 - dist
-nn = NearestNeighbors(n_neighbors=50, metric="cosine")
-nn.fit(X)
 
-print("✅ KNN index built.")
+def load_monthly_data(
+    chunks_path: str = "chunk/sample/monthly_chunks.parquet",
+    x_path: str = "chunk/sample/monthly_feat_matrix.npy",
+):
+    monthly_chunks = pd.read_parquet(chunks_path)
+    X = np.load(x_path)
+    return monthly_chunks, X
 
 
-# In[208]:
+def build_knn_index(X, n_neighbors: int = 50):
+    nn = NearestNeighbors(n_neighbors=n_neighbors, metric="cosine")
+    nn.fit(X)
+    return nn
 
 
-# =========================
-# 3) Query function: find Top-K similar months + build evidence + build compare table
-# =========================
-import numpy as np
-
-def query_similar(symbol: str, month: str, k: int = 10, exclude_self: bool = True):
-    """
-    symbol: e.g. "AAPL"
-    month:  e.g. "2024-11"
-    returns:
-      res: DataFrame with top-k similar rows
-      evidence: dict contains query/top1 meta + curves
-    """
+def query_similar(monthly_chunks, X, nn, symbol: str, month: str, k: int = 10, exclude_self: bool = True):
     mask = (monthly_chunks["symbol"] == symbol) & (monthly_chunks["month"] == month)
     if mask.sum() == 0:
         raise ValueError(f"Cannot find chunk for {symbol} {month}. Check available months.")
@@ -83,11 +27,10 @@ def query_similar(symbol: str, month: str, k: int = 10, exclude_self: bool = Tru
     q_idx = int(np.where(mask.to_numpy())[0][0])
     q_vec = X[q_idx].reshape(1, -1)
 
-    # get more neighbors then filter self
     dist, idx = nn.kneighbors(q_vec, n_neighbors=max(k + 5, 20))
     idx = idx.flatten()
     dist = dist.flatten()
-    sim = 1 - dist  # cosine similarity
+    sim = 1 - dist
 
     out = []
     for i, s in zip(idx, sim):
@@ -97,7 +40,6 @@ def query_similar(symbol: str, month: str, k: int = 10, exclude_self: bool = Tru
         if len(out) >= k:
             break
 
-    # build result table
     rows = []
     for rank, (i, s) in enumerate(out, start=1):
         r = monthly_chunks.iloc[i]
@@ -108,7 +50,6 @@ def query_similar(symbol: str, month: str, k: int = 10, exclude_self: bool = Tru
             "month": r.get("month"),
             "start_date": r.get("start_date"),
             "end_date": r.get("end_date"),
-            # some common feature cols (if exist)
             "feat_month_ret": r.get("feat_month_ret", np.nan),
             "feat_month_vol": r.get("feat_month_vol", np.nan),
             "feat_month_mdd": r.get("feat_month_mdd", np.nan),
@@ -117,7 +58,6 @@ def query_similar(symbol: str, month: str, k: int = 10, exclude_self: bool = Tru
         })
     res = pd.DataFrame(rows)
 
-    # evidence curves (used for plotting / debugging)
     q_row = monthly_chunks.iloc[q_idx]
     top1_i = out[0][0]
     top1_row = monthly_chunks.iloc[top1_i]
@@ -125,7 +65,6 @@ def query_similar(symbol: str, month: str, k: int = 10, exclude_self: bool = Tru
     q_curve = np.array(q_row["curve_cum"], dtype=float)
     t_curve = np.array(top1_row["curve_cum"], dtype=float)
 
-    # normalize start=1
     q_curve = q_curve / (q_curve[0] if q_curve[0] != 0 else 1.0)
     t_curve = t_curve / (t_curve[0] if t_curve[0] != 0 else 1.0)
 
@@ -141,150 +80,59 @@ def query_similar(symbol: str, month: str, k: int = 10, exclude_self: bool = Tru
 
 
 def build_compare_table(monthly_chunks: pd.DataFrame, evidence: dict) -> pd.DataFrame:
-    """
-    Create the Query vs Top1 feature compare table like your screenshot.
-    index: feature name
-    cols:  Query, Top1
-    """
     q_idx = evidence["q_idx"]
     t_idx = evidence["top1_idx"]
     q_row = monthly_chunks.iloc[q_idx]
     t_row = monthly_chunks.iloc[t_idx]
 
-    # choose columns: ctx_* plus selected feat_*
     wanted = [c for c in monthly_chunks.columns if c.startswith("ctx_")]
     wanted += [
         "feat_month_ret", "feat_month_vol", "feat_month_mdd", "feat_trend_slope",
         "feat_ret_first_half", "feat_ret_second_half", "feat_vol20_chg",
     ]
-    # keep only existing
     wanted = [c for c in wanted if c in monthly_chunks.columns]
 
     compare = pd.DataFrame({
         "Query": [q_row[c] for c in wanted],
-        "Top1":  [t_row[c] for c in wanted],
+        "Top1": [t_row[c] for c in wanted],
     }, index=wanted)
 
-    # make sure numeric where possible
     compare["Query"] = pd.to_numeric(compare["Query"], errors="coerce")
     compare["Top1"] = pd.to_numeric(compare["Top1"], errors="coerce")
-
     return compare
 
 
-# In[209]:
+def build_segments(monthly_chunks: pd.DataFrame, res: pd.DataFrame, query_symbol: str, query_month: str):
+    q = monthly_chunks[(monthly_chunks["symbol"] == query_symbol) & (monthly_chunks["month"] == query_month)]
+    if q.empty:
+        raise ValueError(f"Query not found in monthly_chunks: {query_symbol} {query_month}")
 
+    qrow = q.iloc[0]
+    seg2 = {
+        "symbol": query_symbol,
+        "start": pd.to_datetime(qrow["start_date"]),
+        "end": pd.to_datetime(qrow["end_date"]),
+    }
 
-# =========================
-# 4) Pick which (symbol, month) you want -> generate compare.csv automatically
-# =========================
-QUERY_SYMBOL = "AAPL"
-QUERY_MONTH  = "2024-11"
-K = 10
+    seg1_row = None
+    for _, row in res.iterrows():
+        if (row["symbol"] == query_symbol) and (row["month"] == query_month):
+            continue
+        seg1_row = row
+        break
 
-res, evidence = query_similar(QUERY_SYMBOL, QUERY_MONTH, k=K)
-display(res)
+    if seg1_row is None:
+        raise ValueError("No suitable historical segment found in res.")
 
-compare = build_compare_table(monthly_chunks, evidence)
-display(compare)
-
-# save compare.csv into repo
-OUT_COMPARE = Path("chunk/sample/compare.csv")
-compare.to_csv(OUT_COMPARE)
-print("✅ saved:", OUT_COMPARE, " shape:", compare.shape)
-
-
-# In[210]:
-
-
-print(compare.columns)
-
-
-# In[211]:
-
-
-print(res.columns)
-print(res.head())
-
-
-# In[212]:
-
-
-import pandas as pd
-
-# 1) Segment 2：严格用 query_symbol + query_month 在 monthly_chunks 里定位
-q = monthly_chunks[(monthly_chunks["symbol"] == QUERY_SYMBOL) & (monthly_chunks["month"] == QUERY_MONTH)]
-if q.empty:
-    raise ValueError(f"Query not found in monthly_chunks: {QUERY_SYMBOL} {QUERY_MONTH}")
-
-qrow = q.iloc[0]
-seg2 = {
-    "symbol": QUERY_SYMBOL,
-    "start": pd.to_datetime(qrow["start_date"]),
-    "end": pd.to_datetime(qrow["end_date"]),
-}
-
-# 2) Segment 1：从 res 里挑“历史最相似”，排除同 symbol & 同 month（避免拿自己/同月）
-seg1_row = None
-for _, row in res.iterrows():
-    if (row["symbol"] == QUERY_SYMBOL) and (row["month"] == QUERY_MONTH):
-        continue
-    # 你也可以只排除同 month：if row["month"] == QUERY_MONTH: continue
-    seg1_row = row
-    break
-
-if seg1_row is None:
-    raise ValueError("No suitable historical segment found in res.")
-
-seg1 = {
-    "symbol": seg1_row["symbol"],
-    "start": pd.to_datetime(seg1_row["start_date"]),
-    "end": pd.to_datetime(seg1_row["end_date"]),
-}
-
-print("Segment 1:", seg1)
-print("Segment 2:", seg2)
-
-
-# In[213]:
-
-
-# =========================
-# 5) Build Segments (two companies, same month)
-# =========================
-
-segments = [
-    {
-        "segment_id": 1,
-        "symbol": seg1["symbol"],
-        "start_date": seg1["start"].strftime("%Y-%m-%d"),
-        "end_date": seg1["end"].strftime("%Y-%m-%d"),
-    },
-    {
-        "segment_id": 2,
-        "symbol": seg2["symbol"],
-        "start_date": seg2["start"].strftime("%Y-%m-%d"),
-        "end_date": seg2["end"].strftime("%Y-%m-%d"),
-    },
-]
-
-print("Segments:\n", segments)
-
-
-print(f"""
-Segment 1:
-{seg1['symbol']} {seg1['start'].strftime('%Y-%m-%d')} → {seg1['end'].strftime('%Y-%m-%d')}
-
-Segment 2:
-{seg2['symbol']} {seg2['start'].strftime('%Y-%m-%d')} → {seg2['end'].strftime('%Y-%m-%d')}
-""")
-
-
-# In[214]:
+    seg1 = {
+        "symbol": seg1_row["symbol"],
+        "start": pd.to_datetime(seg1_row["start_date"]),
+        "end": pd.to_datetime(seg1_row["end_date"]),
+    }
+    return seg1, seg2
 
 
 def build_llm_table(seg1, seg2, compare: pd.DataFrame):
-
     rows = []
 
     r1 = {
@@ -307,25 +155,8 @@ def build_llm_table(seg1, seg2, compare: pd.DataFrame):
 
     rows.append(r1)
     rows.append(r2)
-
     return pd.DataFrame(rows)
-segment_df = build_llm_table(seg1, seg2, compare)
-segment_df = build_llm_table(seg1, seg2, compare)
 
-print(segment_df)
-
-
-# In[215]:
-
-
-segment_table_md = segment_df.to_markdown(index=False)
-print(segment_table_md)
-
-
-# In[216]:
-
-
-from pathlib import Path
 
 def build_market_prompt(segment_table_md: str) -> str:
     return f"""
@@ -420,88 +251,33 @@ Data:
 {segment_table_md}
 """.strip()
 
-prompt = build_market_prompt(segment_table_md)
-Path("prompt.txt").write_text(prompt, encoding="utf-8")
-print("prompt saved")
-
-
-# In[217]:
-
-
-from huggingface_hub import hf_hub_download
-
-repo_id = "unsloth/Qwen3.5-35B-A3B-GGUF"
-filename = "Qwen3.5-35B-A3B-Q4_K_M.gguf"
-
-local_path = hf_hub_download(
-    repo_id=repo_id,
-    filename=filename
-)
-
-
-# In[218]:
-
-
-# =========================
-# 8) (Optional) Run local LLM with llama.cpp -> analysis.md
-#    如果你还没有 gguf 模型，先跳过这一格
-# =========================
-from pathlib import Path
-
-# Build llama.cpp if needed
-if not Path("llama.cpp").exists():
-    get_ipython().system('git clone https://github.com/ggerganov/llama.cpp')
-
-get_ipython().run_line_magic('cd', 'llama.cpp')
-get_ipython().system('cmake -B build -DGGML_CUDA=ON')
-get_ipython().system('cmake --build build -j')
-get_ipython().run_line_magic('cd', '..')
-
-# >>> IMPORTANT: Set your local gguf model path here <<<
-MODEL_PATH = "/root/.cache/huggingface/hub/models--unsloth--Qwen3.5-35B-A3B-GGUF/snapshots/0da7d49832a73abe50f0c89070971b59dad0039d/Qwen3.5-35B-A3B-Q4_K_M.gguf"
-
-assert Path(MODEL_PATH).exists(), f"❌ MODEL_PATH not found: {MODEL_PATH}"
-
-
-
-# In[219]:
-
-
-get_ipython().system('./llama.cpp/build/bin/llama-cli    -m "{MODEL_PATH}"    -f prompt.txt    -c 8192    -ngl 50    --temp 0.0    2>&1 | tee analysis.md')
-
-
-# In[222]:
-
-
-from pathlib import Path
-
-raw = Path("analysis.md").read_text(errors="ignore")
-
 
 def extract_final_output(text: str) -> str:
-
     if "</think>" in text:
         text = text.split("</think>")[-1]
-
     if "<<<BEGIN_FINAL>>>" in text and "<<<END_FINAL>>>" in text:
         text = text.split("<<<BEGIN_FINAL>>>", 1)[1].split("<<<END_FINAL>>>", 1)[0]
-
     return text.strip()
 
 
-final_text = extract_final_output(raw)
+def build_prompt_from_query(query_symbol: str, query_month: str, k: int = 10):
+    monthly_chunks, X = load_monthly_data()
+    nn = build_knn_index(X)
+    res, evidence = query_similar(monthly_chunks, X, nn, query_symbol, query_month, k=k)
+    compare = build_compare_table(monthly_chunks, evidence)
+    seg1, seg2 = build_segments(monthly_chunks, res, query_symbol, query_month)
+    segment_df = build_llm_table(seg1, seg2, compare)
+    segment_table_md = segment_df.to_markdown(index=False)
+    prompt = build_market_prompt(segment_table_md)
 
-Path("final.md").write_text(final_text, encoding="utf-8")
-
-print("saved final.md, chars =", len(final_text))
-
-print("\n--- preview ---\n")
-print("\n".join(final_text.splitlines()[:120]))
-
-
-# In[223]:
-
-
-import os
-print(os.getcwd())
+    return {
+        "res": res,
+        "evidence": evidence,
+        "compare": compare,
+        "seg1": seg1,
+        "seg2": seg2,
+        "segment_df": segment_df,
+        "segment_table_md": segment_table_md,
+        "prompt": prompt,
+    }
 
