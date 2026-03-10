@@ -24,7 +24,7 @@ DEFAULT_K = 10
 
 DEFAULT_REPO_ID = "unsloth/Qwen2.5-7B-Instruct-GGUF"
 DEFAULT_FILENAME = "Qwen2.5-7B-Instruct-Q4_K_M.gguf"
-DEFAULT_MODEL_PATH = "/Users/mac/path/to/Qwen2.5-7B-Instruct-Q4_K_M.gguf"
+
 
 # ----------------------------
 # Simple in-memory cache
@@ -149,7 +149,7 @@ def run_similarity(logs):
 
 
 def run_vol_target(logs):
-    sim_perf, pred_df = run_similarity(logs)
+    _, pred_df = run_similarity(logs)
 
     if _CACHE["vt"] is None or _CACHE["vt_perf"] is None:
         logs.append("Applying volatility targeting to similarity returns.")
@@ -167,7 +167,12 @@ def run_vol_target(logs):
     return _CACHE["vt_perf"], pred_df
 
 
-def run_llm_prompt(logs, query_symbol=DEFAULT_QUERY_SYMBOL, query_month=DEFAULT_QUERY_MONTH, k=DEFAULT_K):
+def run_llm_prompt(
+    logs,
+    query_symbol=DEFAULT_QUERY_SYMBOL,
+    query_month=DEFAULT_QUERY_MONTH,
+    k=DEFAULT_K,
+):
     logs.append(
         f"Building LLM prompt for symbol={query_symbol}, month={query_month}, k={k}."
     )
@@ -239,7 +244,15 @@ def route_message(user_message: str) -> str:
     if any(x in msg for x in ["help", "what can you do", "commands"]):
         return "help"
 
-    if any(x in msg for x in ["generate llm analysis", "run llm", "market commentary", "generate commentary"]):
+    if any(
+        x in msg
+        for x in [
+            "generate llm analysis",
+            "run llm",
+            "market commentary",
+            "generate commentary",
+        ]
+    ):
         return "llm_analysis"
 
     if any(x in msg for x in ["run all", "summary", "overall", "full pipeline"]):
@@ -317,7 +330,7 @@ def run_pipeline(user_message, chat_history):
             )
 
         elif command == "similarity":
-            sim_perf, pred_df = run_similarity(logs)
+            sim_perf, _ = run_similarity(logs)
             final_reply = "\n".join(
                 [
                     "## Similarity Strategy",
@@ -328,7 +341,7 @@ def run_pipeline(user_message, chat_history):
             )
 
         elif command == "vol_target":
-            vt_perf, pred_df = run_vol_target(logs)
+            vt_perf, _ = run_vol_target(logs)
             final_reply = "\n".join(
                 [
                     "## Similarity + Vol Target",
@@ -339,7 +352,7 @@ def run_pipeline(user_message, chat_history):
             )
 
         elif command == "rows":
-            sim_perf, pred_df = run_similarity(logs)
+            _, pred_df = run_similarity(logs)
             final_reply = "\n".join(
                 [
                     "## Retrieved Similarity Rows",
@@ -357,7 +370,7 @@ def run_pipeline(user_message, chat_history):
                 query_symbol=DEFAULT_QUERY_SYMBOL,
                 query_month=DEFAULT_QUERY_MONTH,
                 k=DEFAULT_K,
-             )
+            )
 
             final_reply = "\n".join(
                 [
@@ -376,12 +389,13 @@ def run_pipeline(user_message, chat_history):
             )
 
         elif command == "llm_analysis":
-            llm_pkg, llm_out = run_llm_analysis(
+            _, llm_out = run_llm_analysis(
                 logs,
                 query_symbol=DEFAULT_QUERY_SYMBOL,
                 query_month=DEFAULT_QUERY_MONTH,
                 k=DEFAULT_K,
-                model_path=DEFAULT_MODEL_PATH,
+                repo_id=DEFAULT_REPO_ID,
+                filename=DEFAULT_FILENAME,
             )
 
             final_text = llm_out.get("final_text", "").strip()
@@ -431,7 +445,7 @@ def run_pipeline(user_message, chat_history):
 
         else:
             base_perf = run_baseline(logs)
-            sim_perf, pred_df = run_similarity(logs)
+            sim_perf, _ = run_similarity(logs)
             vt_perf, _ = run_vol_target(logs)
 
             final_reply = "\n".join(
