@@ -13,10 +13,7 @@ def run_local_llm(
     ngl: int = 50,
     temperature: float = 0.0,
 ):
-    # =========================
-    # download model from HuggingFace
-    # =========================
-    repo_id = "unsloth/Qwen2.5-7B-Instruct-GGUF"
+    repo_id = "bartowski/Qwen2.5-7B-Instruct-GGUF"
     filename = "Qwen2.5-7B-Instruct-Q4_K_M.gguf"
 
     model_path = hf_hub_download(
@@ -24,9 +21,6 @@ def run_local_llm(
         filename=filename
     )
 
-    # =========================
-    # run llama.cpp
-    # =========================
     work_dir = Path(work_dir)
     prompt_path = work_dir / "prompt.txt"
     analysis_path = work_dir / "analysis.md"
