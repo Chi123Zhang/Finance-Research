@@ -14,9 +14,7 @@ from strategy.similarity import build_monthly_weights_similarity
 
 
 def run_pipeline(user_message, chat_history):
-    if chat_history is None:
-        chat_history = []
-
+    chat_history = chat_history or []
     logs = []
     reply_parts = []
 
@@ -70,7 +68,9 @@ def run_pipeline(user_message, chat_history):
         logs.append("Pipeline failed.")
         logs.append(traceback.format_exc())
 
-    chat_history = chat_history + [[user_message, final_reply]]
+    chat_history.append({"role": "user", "content": user_message})
+    chat_history.append({"role": "assistant", "content": final_reply})
+
     pipeline_text = "\n".join(logs)
     return chat_history, pipeline_text, ""
 
@@ -84,10 +84,14 @@ with gr.Blocks(title="Finance Research Demo") as demo:
 
     with gr.Row():
         with gr.Column(scale=3):
-            chatbot = gr.Chatbot(height=500, label="Conversation")
+            chatbot = gr.Chatbot(
+                height=500,
+                label="Conversation",
+                type="messages",
+            )
             msg = gr.Textbox(
                 label="Your message",
-                placeholder="Type your message here..."
+                placeholder="Type your message here...",
             )
 
             with gr.Row():
