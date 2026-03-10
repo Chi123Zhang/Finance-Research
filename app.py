@@ -376,13 +376,12 @@ def run_pipeline(user_message, chat_history):
             )
 
         elif command == "llm_analysis":
-           llm_pkg, llm_out = run_llm_analysis(
-               logs,
-               query_symbol=DEFAULT_QUERY_SYMBOL,
-               query_month=DEFAULT_QUERY_MONTH,
-               k=DEFAULT_K,
-               repo_id=DEFAULT_REPO_ID,
-               filename=DEFAULT_FILENAME,
+            llm_pkg, llm_out = run_llm_analysis(
+                logs,
+                query_symbol=DEFAULT_QUERY_SYMBOL,
+                query_month=DEFAULT_QUERY_MONTH,
+                k=DEFAULT_K,
+                model_path=DEFAULT_MODEL_PATH,
             )
 
             final_text = llm_out.get("final_text", "").strip()
