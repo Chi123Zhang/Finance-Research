@@ -12,6 +12,18 @@ from strategy.equal_weight import build_weights_equal_weight, EqualWeightConfig
 from chunk.index import SimilarityIndex
 from strategy.similarity import build_monthly_weights_similarity
 from llm.reasoning import build_prompt_from_query
+from llm.llm_call import run_local_llm
+
+
+# ----------------------------
+# Config
+# ----------------------------
+DEFAULT_QUERY_SYMBOL = "AAPL"
+DEFAULT_QUERY_MONTH = "2024-11"
+DEFAULT_K = 10
+
+# TODO: replace this with your actual local GGUF model path
+DEFAULT_MODEL_PATH = "/Users/yourname/models/Qwen3.5-35B-A3B-Q4_K_M.gguf"
 
 
 # ----------------------------
@@ -155,7 +167,7 @@ def run_vol_target(logs):
     return _CACHE["vt_perf"], pred_df
 
 
-def run_llm_prompt(logs, query_symbol="AAPL", query_month="2024-11", k=10):
+def run_llm_prompt(logs, query_symbol=DEFAULT_QUERY_SYMBOL, query_month=DEFAULT_QUERY_MONTH, k=DEFAULT_K):
     logs.append(
         f"Building LLM prompt for symbol={query_symbol}, month={query_month}, k={k}."
     )
@@ -166,6 +178,35 @@ def run_llm_prompt(logs, query_symbol="AAPL", query_month="2024-11", k=10):
         f"LLM segment table shape: {getattr(pkg.get('segment_df'), 'shape', None)}"
     )
     return pkg
+
+
+def run_llm_analysis(
+    logs,
+    query_symbol=DEFAULT_QUERY_SYMBOL,
+    query_month=DEFAULT_QUERY_MONTH,
+    k=DEFAULT_K,
+    model_path=DEFAULT_MODEL_PATH,
+):
+    logs.append(
+        f"Building full LLM analysis for symbol={query_symbol}, month={query_month}, k={k}."
+    )
+
+    if not model_path or model_path == "YOUR_LOCAL_GGUF_MODEL_PATH":
+        raise ValueError(
+            "DEFAULT_MODEL_PATH is not set. Please update it in app.py to your local GGUF model path."
+        )
+
+    pkg = build_prompt_from_query(query_symbol, query_month, k=k)
+    logs.append("Prompt package built. Running local LLM inference.")
+
+    out = run_local_llm(
+        prompt=pkg["prompt"],
+        model_path=model_path,
+    )
+
+    logs.append(f"Local LLM return code: {out.get('returncode')}")
+    logs.append(f"Saved raw analysis to: {out.get('analysis_path')}")
+    return pkg, out
 
 
 def build_help_message():
@@ -185,6 +226,9 @@ You can ask things like:
 - `build llm prompt`
 - `show llm prompt`
 - `market prompt`
+- `generate llm analysis`
+- `run llm`
+- `market commentary`
 
 This demo supports simple natural-language commands and returns the corresponding strategy outputs.
 """
@@ -195,6 +239,9 @@ def route_message(user_message: str) -> str:
 
     if any(x in msg for x in ["help", "what can you do", "commands"]):
         return "help"
+
+    if any(x in msg for x in ["generate llm analysis", "run llm", "market commentary", "generate commentary"]):
+        return "llm_analysis"
 
     if any(x in msg for x in ["run all", "summary", "overall", "full pipeline"]):
         return "run_all"
@@ -306,7 +353,12 @@ def run_pipeline(user_message, chat_history):
             )
 
         elif command == "llm_prompt":
-            llm_pkg = run_llm_prompt(logs, query_symbol="AAPL", query_month="2024-11", k=10)
+            llm_pkg = run_llm_prompt(
+                logs,
+                query_symbol=DEFAULT_QUERY_SYMBOL,
+                query_month=DEFAULT_QUERY_MONTH,
+                k=DEFAULT_K,
+            )
 
             final_reply = "\n".join(
                 [
@@ -324,11 +376,35 @@ def run_pipeline(user_message, chat_history):
                 ]
             )
 
+        elif command == "llm_analysis":
+            llm_pkg, llm_out = run_llm_analysis(
+                logs,
+                query_symbol=DEFAULT_QUERY_SYMBOL,
+                query_month=DEFAULT_QUERY_MONTH,
+                k=DEFAULT_K,
+                model_path=DEFAULT_MODEL_PATH,
+            )
+
+            final_text = llm_out.get("final_text", "").strip()
+
+            final_reply = "\n".join(
+                [
+                    "## LLM Market Commentary",
+                    "",
+                    final_text if final_text else "LLM returned no final text.",
+                ]
+            )
+
         elif command == "compare" or command == "run_all":
             base_perf = run_baseline(logs)
             sim_perf, pred_df = run_similarity(logs)
             vt_perf, _ = run_vol_target(logs)
-            llm_pkg = run_llm_prompt(logs, query_symbol="AAPL", query_month="2024-11", k=10)
+            llm_pkg = run_llm_prompt(
+                logs,
+                query_symbol=DEFAULT_QUERY_SYMBOL,
+                query_month=DEFAULT_QUERY_MONTH,
+                k=DEFAULT_K,
+            )
 
             final_reply = "\n".join(
                 [
@@ -390,7 +466,7 @@ def clear_chat():
 with gr.Blocks(title="Finance Research Demo") as demo:
     gr.Markdown("# Finance Research Demo")
     gr.Markdown(
-        "Ask about baseline, similarity strategy, volatility targeting, retrieved rows, or the LLM market prompt."
+        "Ask about baseline, similarity strategy, volatility targeting, retrieved rows, the LLM market prompt, or generate full LLM commentary."
     )
 
     with gr.Row():
@@ -404,7 +480,7 @@ with gr.Blocks(title="Finance Research Demo") as demo:
 
             msg = gr.Textbox(
                 label="Your message",
-                placeholder="Example: compare strategies / build llm prompt",
+                placeholder="Example: compare strategies / build llm prompt / generate llm analysis",
             )
 
             with gr.Row():
