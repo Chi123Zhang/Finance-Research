@@ -69,41 +69,6 @@ def run_pipeline(user_message, chat_history):
             except Exception:
                 reply_parts.append(pred_df.head(5).to_string(index=False))
 
-        if explain_trade_signal is not None and isinstance(pred_df, pd.DataFrame) and not pred_df.empty:
-            logs.append("Step 7: Generating explanation.")
-            demo_res = pred_df.head(10).copy()
-
-            evidence = {
-                "pred": {
-                    "p10": demo_res["label_next_month_ret"].quantile(0.1)
-                    if "label_next_month_ret" in demo_res.columns else None,
-                    "p50": demo_res["label_next_month_ret"].quantile(0.5)
-                    if "label_next_month_ret" in demo_res.columns else None,
-                    "p90": demo_res["label_next_month_ret"].quantile(0.9)
-                    if "label_next_month_ret" in demo_res.columns else None,
-                    "mean": demo_res["label_next_month_ret"].mean()
-                    if "label_next_month_ret" in demo_res.columns else None,
-                }
-            }
-
-            explanation = explain_trade_signal(
-                symbol="DEMO",
-                month="CURRENT",
-                res=demo_res,
-                evidence=evidence,
-            )
-
-            reply_parts.append("\n## Explanation")
-            reply_parts.append(f"- Action: **{explanation['action']}**")
-            reply_parts.append(f"- Score: `{explanation['score']:.4f}`")
-            reply_parts.append(f"- Expected return: `{explanation['expected_return']}`")
-            reply_parts.append(f"- Uncertainty: `{explanation['uncertainty']}`")
-
-            if explanation.get("rationale"):
-                reply_parts.append("\n## Rationale")
-                for r in explanation["rationale"]:
-                    reply_parts.append(f"- {r}")
-
         final_reply = "\n".join(reply_parts)
 
     except Exception as e:
@@ -111,8 +76,7 @@ def run_pipeline(user_message, chat_history):
         logs.append("Pipeline failed.")
         logs.append(traceback.format_exc())
 
-    chat_history = chat_history + [{"role": "user", "content": user_message},
-                                   {"role": "assistant", "content": final_reply}]
+    chat_history = chat_history + [[user_message, final_reply]]
     pipeline_text = "\n".join(logs)
     return chat_history, pipeline_text, ""
 
@@ -126,7 +90,7 @@ with gr.Blocks(title="Finance Research Demo") as demo:
 
     with gr.Row():
         with gr.Column(scale=3):
-            chatbot = gr.Chatbot(type="messages", height=500, label="Conversation")
+            chatbot = gr.Chatbot(height=500, label="Conversation")
             msg = gr.Textbox(
                 label="Your message",
                 placeholder="Type your message here..."
