@@ -11,6 +11,7 @@ from strategy.backtest import (
 from strategy.equal_weight import build_weights_equal_weight, EqualWeightConfig
 from chunk.index import SimilarityIndex
 from strategy.similarity import build_monthly_weights_similarity
+from llm.reasoning import build_prompt_from_query
 
 
 # ----------------------------
@@ -53,6 +54,15 @@ def preview_dataframe(df: pd.DataFrame, n_rows: int = 5, max_cols: int = 6) -> s
         out = out.iloc[:, :max_cols]
 
     return out.to_string(index=False)
+
+
+def preview_text(text: str, max_chars: int = 1800) -> str:
+    if text is None:
+        return ""
+    text = str(text)
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n\n...[truncated]..."
 
 
 def get_data_and_returns(logs):
@@ -145,6 +155,19 @@ def run_vol_target(logs):
     return _CACHE["vt_perf"], pred_df
 
 
+def run_llm_prompt(logs, query_symbol="AAPL", query_month="2024-11", k=10):
+    logs.append(
+        f"Building LLM prompt for symbol={query_symbol}, month={query_month}, k={k}."
+    )
+    pkg = build_prompt_from_query(query_symbol, query_month, k=k)
+    logs.append("LLM prompt package built successfully.")
+    logs.append(f"LLM compare table shape: {getattr(pkg.get('compare'), 'shape', None)}")
+    logs.append(
+        f"LLM segment table shape: {getattr(pkg.get('segment_df'), 'shape', None)}"
+    )
+    return pkg
+
+
 def build_help_message():
     return """## Finance Research Demo
 
@@ -159,6 +182,9 @@ You can ask things like:
 - `compare strategies`
 - `show top rows`
 - `what did the similarity model retrieve?`
+- `build llm prompt`
+- `show llm prompt`
+- `market prompt`
 
 This demo supports simple natural-language commands and returns the corresponding strategy outputs.
 """
@@ -179,14 +205,42 @@ def route_message(user_message: str) -> str:
     if any(x in msg for x in ["baseline", "equal weight", "equal-weight"]):
         return "baseline"
 
-    if any(x in msg for x in ["vol target", "vol-target", "volatility target", "volatility targeting"]):
+    if any(
+        x in msg
+        for x in [
+            "vol target",
+            "vol-target",
+            "volatility target",
+            "volatility targeting",
+        ]
+    ):
         return "vol_target"
 
-    if any(x in msg for x in ["top rows", "show rows", "retrieved rows", "similarity rows", "what did the similarity model retrieve"]):
+    if any(
+        x in msg
+        for x in [
+            "top rows",
+            "show rows",
+            "retrieved rows",
+            "similarity rows",
+            "what did the similarity model retrieve",
+        ]
+    ):
         return "rows"
 
     if any(x in msg for x in ["similarity", "similar strategy", "similarity strategy"]):
         return "similarity"
+
+    if any(
+        x in msg
+        for x in [
+            "llm prompt",
+            "build llm prompt",
+            "show llm prompt",
+            "market prompt",
+        ]
+    ):
+        return "llm_prompt"
 
     return "default"
 
@@ -207,73 +261,115 @@ def run_pipeline(user_message, chat_history):
 
         elif command == "baseline":
             base_perf = run_baseline(logs)
-            final_reply = "\n".join([
-                "## Equal-Weight Baseline",
-                f"- {fmt_perf(base_perf)}",
-                "",
-                "This is the benchmark strategy used for comparison."
-            ])
+            final_reply = "\n".join(
+                [
+                    "## Equal-Weight Baseline",
+                    f"- {fmt_perf(base_perf)}",
+                    "",
+                    "This is the benchmark strategy used for comparison.",
+                ]
+            )
 
         elif command == "similarity":
             sim_perf, pred_df = run_similarity(logs)
-            final_reply = "\n".join([
-                "## Similarity Strategy",
-                f"- {fmt_perf(sim_perf)}",
-                "",
-                "This strategy builds weights from retrieved similar historical patterns."
-            ])
+            final_reply = "\n".join(
+                [
+                    "## Similarity Strategy",
+                    f"- {fmt_perf(sim_perf)}",
+                    "",
+                    "This strategy builds weights from retrieved similar historical patterns.",
+                ]
+            )
 
         elif command == "vol_target":
             vt_perf, pred_df = run_vol_target(logs)
-            final_reply = "\n".join([
-                "## Similarity + Vol Target",
-                f"- {fmt_perf(vt_perf)}",
-                "",
-                "This version applies volatility targeting on top of the similarity strategy."
-            ])
+            final_reply = "\n".join(
+                [
+                    "## Similarity + Vol Target",
+                    f"- {fmt_perf(vt_perf)}",
+                    "",
+                    "This version applies volatility targeting on top of the similarity strategy.",
+                ]
+            )
 
         elif command == "rows":
             sim_perf, pred_df = run_similarity(logs)
-            final_reply = "\n".join([
-                "## Retrieved Similarity Rows",
-                "```text",
-                preview_dataframe(pred_df, n_rows=5, max_cols=6),
-                "```",
-                "",
-                "Only a compact preview is shown here so the chat layout stays readable."
-            ])
+            final_reply = "\n".join(
+                [
+                    "## Retrieved Similarity Rows",
+                    "```text",
+                    preview_dataframe(pred_df, n_rows=5, max_cols=6),
+                    "```",
+                    "",
+                    "Only a compact preview is shown here so the chat layout stays readable.",
+                ]
+            )
+
+        elif command == "llm_prompt":
+            llm_pkg = run_llm_prompt(logs, query_symbol="AAPL", query_month="2024-11", k=10)
+
+            final_reply = "\n".join(
+                [
+                    "## LLM Market Prompt",
+                    "",
+                    "### Segment Table Preview",
+                    "```text",
+                    preview_dataframe(llm_pkg["segment_df"], n_rows=5, max_cols=8),
+                    "```",
+                    "",
+                    "### Prompt Preview",
+                    "```text",
+                    preview_text(llm_pkg["prompt"], max_chars=1800),
+                    "```",
+                ]
+            )
 
         elif command == "compare" or command == "run_all":
             base_perf = run_baseline(logs)
             sim_perf, pred_df = run_similarity(logs)
             vt_perf, _ = run_vol_target(logs)
+            llm_pkg = run_llm_prompt(logs, query_symbol="AAPL", query_month="2024-11", k=10)
 
-            final_reply = "\n".join([
-                "## Strategy Comparison",
-                f"- **Baseline:** {fmt_perf(base_perf)}",
-                f"- **Similarity:** {fmt_perf(sim_perf)}",
-                f"- **Similarity + Vol Target:** {fmt_perf(vt_perf)}",
-                "",
-                "## Retrieved Similarity Rows (Preview)",
-                "```text",
-                preview_dataframe(pred_df, n_rows=5, max_cols=6),
-                "```"
-            ])
+            final_reply = "\n".join(
+                [
+                    "## Strategy Comparison",
+                    f"- **Baseline:** {fmt_perf(base_perf)}",
+                    f"- **Similarity:** {fmt_perf(sim_perf)}",
+                    f"- **Similarity + Vol Target:** {fmt_perf(vt_perf)}",
+                    "",
+                    "## Retrieved Similarity Rows (Preview)",
+                    "```text",
+                    preview_dataframe(pred_df, n_rows=5, max_cols=6),
+                    "```",
+                    "",
+                    "## LLM Segment Table (Preview)",
+                    "```text",
+                    preview_dataframe(llm_pkg["segment_df"], n_rows=5, max_cols=8),
+                    "```",
+                    "",
+                    "## LLM Prompt (Preview)",
+                    "```text",
+                    preview_text(llm_pkg["prompt"], max_chars=1200),
+                    "```",
+                ]
+            )
 
         else:
             base_perf = run_baseline(logs)
             sim_perf, pred_df = run_similarity(logs)
             vt_perf, _ = run_vol_target(logs)
 
-            final_reply = "\n".join([
-                "## Strategy Summary",
-                f"- **Baseline:** {fmt_perf(base_perf)}",
-                f"- **Similarity:** {fmt_perf(sim_perf)}",
-                f"- **Similarity + Vol Target:** {fmt_perf(vt_perf)}",
-                "",
-                "I did not detect a specific command, so I returned the overall summary.",
-                "Try `help` to see supported prompts."
-            ])
+            final_reply = "\n".join(
+                [
+                    "## Strategy Summary",
+                    f"- **Baseline:** {fmt_perf(base_perf)}",
+                    f"- **Similarity:** {fmt_perf(sim_perf)}",
+                    f"- **Similarity + Vol Target:** {fmt_perf(vt_perf)}",
+                    "",
+                    "I did not detect a specific command, so I returned the overall summary.",
+                    "Try `help` to see supported prompts.",
+                ]
+            )
 
     except Exception as e:
         final_reply = f"## Pipeline Error\n\n{str(e)}"
@@ -293,7 +389,9 @@ def clear_chat():
 
 with gr.Blocks(title="Finance Research Demo") as demo:
     gr.Markdown("# Finance Research Demo")
-    gr.Markdown("Ask about baseline, similarity strategy, volatility targeting, or retrieved rows.")
+    gr.Markdown(
+        "Ask about baseline, similarity strategy, volatility targeting, retrieved rows, or the LLM market prompt."
+    )
 
     with gr.Row():
         with gr.Column(scale=3):
@@ -306,7 +404,7 @@ with gr.Blocks(title="Finance Research Demo") as demo:
 
             msg = gr.Textbox(
                 label="Your message",
-                placeholder="Example: compare strategies",
+                placeholder="Example: compare strategies / build llm prompt",
             )
 
             with gr.Row():
